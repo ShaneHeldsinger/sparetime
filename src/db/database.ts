@@ -10,9 +10,10 @@
 
 import Dexie, { type Table } from 'dexie'
 import type { Task } from '@/types/task'
+import type { Person } from '@/types/person'
 import type { SuggestionSession } from '@/types/suggestion'
 import type { SyncState } from '@/types/sync'
-import { SCHEMA_VERSION_1, SCHEMA_VERSION_2, CURRENT_SCHEMA_VERSION, migrateNumericPriority } from './schema'
+import { SCHEMA_VERSION_1, SCHEMA_VERSION_2, SCHEMA_VERSION_3, CURRENT_SCHEMA_VERSION, migrateNumericPriority } from './schema'
 
 /**
  * SpareTime Database class
@@ -27,6 +28,9 @@ export class SparetimeDatabase extends Dexie {
 
   /** Sync state table (singleton) */
   syncState!: Table<SyncState, number>
+
+  /** People table - uses string UUID as primary key */
+  people!: Table<Person, string>
 
   constructor() {
     super('SparetimeDB')
@@ -45,6 +49,9 @@ export class SparetimeDatabase extends Dexie {
           }
         })
       })
+
+    // Version 3 - People & task assignment (additive: new table + index, no data migration)
+    this.version(3).stores(SCHEMA_VERSION_3)
   }
 }
 
@@ -85,10 +92,11 @@ export async function closeDatabase(): Promise<void> {
  * @returns Promise that resolves when all tables are cleared
  */
 export async function clearAllData(): Promise<void> {
-  await db.transaction('rw', [db.tasks, db.suggestionSessions, db.syncState], async () => {
+  await db.transaction('rw', [db.tasks, db.suggestionSessions, db.syncState, db.people], async () => {
     await db.tasks.clear()
     await db.suggestionSessions.clear()
     await db.syncState.clear()
+    await db.people.clear()
   })
 }
 
@@ -125,10 +133,12 @@ export async function exportAllData(): Promise<{
   version: number
   exportTimestamp: string
   tasks: Task[]
+  people: Person[]
   suggestionSessions: SuggestionSession[]
 }> {
-  const [tasks, suggestionSessions] = await Promise.all([
+  const [tasks, people, suggestionSessions] = await Promise.all([
     db.tasks.toArray(),
+    db.people.toArray(),
     db.suggestionSessions.toArray()
   ])
 
@@ -136,11 +146,13 @@ export async function exportAllData(): Promise<{
     version: CURRENT_SCHEMA_VERSION,
     exportTimestamp: new Date().toISOString(),
     tasks,
+    people,
     suggestionSessions
   }
 }
 
 // Re-export types for convenience
 export type { Task } from '@/types/task'
+export type { Person } from '@/types/person'
 export type { SuggestionSession } from '@/types/suggestion'
 export type { SyncState } from '@/types/sync'

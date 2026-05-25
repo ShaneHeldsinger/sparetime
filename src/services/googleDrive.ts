@@ -4,6 +4,7 @@
  */
 
 import type { Task } from '@/types/task'
+import type { Person } from '@/types/person'
 import type { GoogleDriveBackup } from '@/types/sync'
 import { generateChecksum } from '@/utils/crypto'
 
@@ -22,15 +23,17 @@ function getClientId(): string {
 }
 
 /**
- * Create a backup payload from tasks
+ * Create a backup payload from tasks and people.
+ * Checksum covers tasks only (people is additive) so older backups stay valid.
  */
-export async function createBackupPayload(tasks: Task[]): Promise<GoogleDriveBackup> {
+export async function createBackupPayload(tasks: Task[], people: Person[] = []): Promise<GoogleDriveBackup> {
   const checksum = await generateChecksum(tasks)
 
   return {
     version: BACKUP_VERSION,
     exportTimestamp: new Date().toISOString(),
     tasks,
+    people,
     checksum
   }
 }

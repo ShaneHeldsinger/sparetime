@@ -2,6 +2,7 @@
 import { RouterView, useRouter } from 'vue-router'
 import { useSyncStore } from '@/stores/syncStore'
 import { useTaskStore } from '@/stores/taskStore'
+import { usePeopleStore } from '@/stores/peopleStore'
 import { onMounted, onUnmounted, computed, ref, onErrorCaptured } from 'vue'
 import { checkStorageQuota, formatBytes, type StorageEstimate } from '@/utils/validation'
 import { WelcomeDialog } from '@/components/onboarding'
@@ -9,6 +10,7 @@ import { WelcomeDialog } from '@/components/onboarding'
 const router = useRouter()
 const syncStore = useSyncStore()
 const taskStore = useTaskStore()
+const peopleStore = usePeopleStore()
 
 // T102: Storage quota monitoring state
 const storageWarning = ref<StorageEstimate | null>(null)
@@ -135,6 +137,9 @@ const hasConflicts = computed(() => syncStore.hasConflicts)
 
 onMounted(async () => {
   await syncStore.loadSyncState()
+
+  // Load people so assignee avatars resolve everywhere
+  await peopleStore.loadPeople()
 
   // Register online/offline listeners
   syncStore.registerOnlineListeners()

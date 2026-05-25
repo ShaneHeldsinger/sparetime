@@ -4,6 +4,7 @@
  */
 
 import type { Task } from './task'
+import type { Person } from './person'
 
 /**
  * Pending change queued for sync
@@ -60,6 +61,8 @@ export interface GoogleDriveBackup {
   exportTimestamp: string
   /** All tasks */
   tasks: Task[]
-  /** SHA-256 checksum for integrity verification */
+  /** All people (additive; not covered by checksum for backward compatibility) */
+  people?: Person[]
+  /** SHA-256 checksum for integrity verification (computed over tasks) */
   checksum: string
 }

@@ -119,6 +119,8 @@ export const useTaskStore = defineStore('task', () => {
         priority: input.priority,
         deadline: input.deadline?.toISOString(),
         dependsOnId: input.dependsOnId,
+        assigneeId: input.assigneeId,
+        occurrenceAssigneeId: input.occurrenceAssigneeId,
         createdAt: now,
         updatedAt: now
       }
@@ -195,6 +197,8 @@ export const useTaskStore = defineStore('task', () => {
         // Clear type-specific fields when changing type
         if (input.type !== 'recurring') {
           updates.recurringPattern = undefined
+          // Occurrence overrides only make sense for recurring tasks
+          updates.occurrenceAssigneeId = undefined
         }
         if (input.type !== 'project') {
           updates.projectSession = undefined
@@ -206,6 +210,11 @@ export const useTaskStore = defineStore('task', () => {
       if (input.location !== undefined) updates.location = input.location
       if (input.priority !== undefined) updates.priority = input.priority
       if (input.dependsOnId !== undefined) updates.dependsOnId = input.dependsOnId
+      // Assignment fields: use `in` so an explicit undefined clears the value
+      // (Dexie deletes a property set to undefined), while callers that omit the
+      // key entirely — e.g. complete() — leave the assignee untouched.
+      if ('assigneeId' in input) updates.assigneeId = input.assigneeId
+      if ('occurrenceAssigneeId' in input) updates.occurrenceAssigneeId = input.occurrenceAssigneeId
 
       // Handle deadline - can be Date, string, or undefined
       if (input.deadline !== undefined) {
@@ -325,6 +334,9 @@ export const useTaskStore = defineStore('task', () => {
 
       return update({
         id,
+        // Advancing to the next occurrence: drop the one-time override so the
+        // task reverts to its series-default assignee.
+        occurrenceAssigneeId: undefined,
         recurringPattern: {
           intervalValue: updatedPattern.intervalValue,
           intervalUnit: updatedPattern.intervalUnit,

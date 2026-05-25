@@ -13,6 +13,7 @@
 
 import { ref, computed, watch, onMounted } from 'vue'
 import { useTaskStore } from '@/stores/taskStore'
+import { usePeopleStore } from '@/stores/peopleStore'
 import type { Task, TaskType, EffortLevel, Location, IntervalUnit, CreateTaskInput, Priority } from '@/types/task'
 import { todayISO } from '@/utils/dateHelpers'
 
@@ -23,8 +24,9 @@ const props = defineProps<{
   onSave?: (task: Task) => void
 }>()
 
-// Store
+// Stores
 const taskStore = useTaskStore()
+const peopleStore = usePeopleStore()
 
 // Form state
 const name = ref('')
@@ -35,6 +37,12 @@ const location = ref<Location>('home')
 const priority = ref<Priority>('important')
 const deadline = ref('')
 const dependsOnId = ref<string | undefined>(undefined)
+
+// Assignment state
+const assigneeId = ref<string | null | undefined>(undefined)
+// For recurring tasks: 'series' sets the default assignee; 'occurrence' overrides
+// only the current occurrence (auto-clears on completion).
+const assignmentScope = ref<'series' | 'occurrence'>('series')
 
 // Recurring pattern state
 const recurringIntervalValue = ref(1)
@@ -60,6 +68,10 @@ const showProjectFields = computed(() => type.value === 'project')
 const availableDependencies = computed(() => {
   return taskStore.activeTasks.filter((t) => t.id !== props.task?.id)
 })
+
+// People available as assignees
+const availablePeople = computed(() => peopleStore.activePeople)
+const showAssigneeField = computed(() => availablePeople.value.length > 0 || assigneeId.value != null)
 
 // Options
 const typeOptions: { value: TaskType; label: string; icon: string }[] = [
@@ -108,6 +120,15 @@ onMounted(() => {
     priority.value = props.task.priority
     deadline.value = props.task.deadline?.split('T')[0] || ''
     dependsOnId.value = props.task.dependsOnId
+
+    // Assignment: an existing occurrence override means we're editing "this time only"
+    if (props.task.type === 'recurring' && props.task.occurrenceAssigneeId !== undefined) {
+      assignmentScope.value = 'occurrence'
+      assigneeId.value = props.task.occurrenceAssigneeId
+    } else {
+      assignmentScope.value = 'series'
+      assigneeId.value = props.task.assigneeId
+    }
 
     if (props.task.recurringPattern) {
       recurringIntervalValue.value = props.task.recurringPattern.intervalValue
@@ -160,6 +181,18 @@ async function handleSubmit() {
       priority: priority.value,
       deadline: deadline.value ? new Date(deadline.value) : undefined,
       dependsOnId: dependsOnId.value
+    }
+
+    // Assignment: recurring tasks distinguish series default vs occurrence override
+    if (type.value === 'recurring' && assignmentScope.value === 'occurrence') {
+      // Override just the current occurrence; leave the series default untouched
+      input.occurrenceAssigneeId = assigneeId.value ?? null
+    } else {
+      input.assigneeId = assigneeId.value ?? undefined
+      // Setting/clearing the series default supersedes any occurrence override
+      if (type.value === 'recurring') {
+        input.occurrenceAssigneeId = undefined
+      }
     }
 
     if (type.value === 'recurring') {
@@ -465,6 +498,63 @@ function handleCancel() {
               type="date"
               class="touch-target flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
             />
+          </div>
+
+          <!-- Assignee (optional) -->
+          <div v-if="showAssigneeField">
+            <label for="assignee" class="block text-sm font-medium text-gray-700 mb-1">
+              Assigned To <span class="text-xs text-gray-500 font-normal">(optional)</span>
+            </label>
+            <select
+              id="assignee"
+              v-model="assigneeId"
+              data-testid="task-assignee-select"
+              class="touch-target w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 cursor-pointer"
+            >
+              <option :value="null">Unassigned</option>
+              <option v-for="p in availablePeople" :key="p.id" :value="p.id">
+                {{ p.name }}
+              </option>
+            </select>
+
+            <p v-if="availablePeople.length === 0" class="text-xs text-gray-400 mt-1">
+              No active people available. You can clear the current assignment.
+            </p>
+
+            <!-- Recurring: choose whether assignment applies to this occurrence or the whole series -->
+            <div v-if="type === 'recurring'" class="mt-2">
+              <div class="grid grid-cols-2 gap-1 bg-gray-100 rounded-lg p-1">
+                <button
+                  type="button"
+                  data-testid="assign-scope-series"
+                  class="touch-target px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer"
+                  :class="assignmentScope === 'series'
+                    ? 'bg-primary-600 text-white shadow-sm'
+                    : 'bg-transparent text-gray-600 hover:bg-white'"
+                  :aria-pressed="assignmentScope === 'series'"
+                  @click="assignmentScope = 'series'"
+                >
+                  Whole series
+                </button>
+                <button
+                  type="button"
+                  data-testid="assign-scope-occurrence"
+                  class="touch-target px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer"
+                  :class="assignmentScope === 'occurrence'
+                    ? 'bg-primary-600 text-white shadow-sm'
+                    : 'bg-transparent text-gray-600 hover:bg-white'"
+                  :aria-pressed="assignmentScope === 'occurrence'"
+                  @click="assignmentScope = 'occurrence'"
+                >
+                  This time only
+                </button>
+              </div>
+              <p class="text-xs text-gray-400 mt-1">
+                {{ assignmentScope === 'occurrence'
+                  ? 'Applies to the current occurrence; reverts after completion.'
+                  : 'Applies to every occurrence going forward.' }}
+              </p>
+            </div>
           </div>
 
           <!-- Dependency (optional) -->

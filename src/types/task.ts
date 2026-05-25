@@ -61,6 +61,10 @@ export interface Task {
   deadline?: string
   /** Optional dependency on another task */
   dependsOnId?: string
+  /** Assignee for one-off/project tasks; series default for recurring tasks */
+  assigneeId?: string
+  /** Recurring only: one-time override for the current occurrence; null means explicitly unassigned */
+  occurrenceAssigneeId?: string | null
   /** Creation timestamp (ISO date string) */
   createdAt: string
   /** Last update timestamp (ISO date string) */
@@ -86,6 +90,8 @@ export interface CreateTaskInput {
   priority: Priority
   deadline?: Date
   dependsOnId?: string
+  assigneeId?: string
+  occurrenceAssigneeId?: string | null
   recurringPattern?: Omit<RecurringPattern, 'nextDueDate'>
   projectSession?: ProjectSession
 }

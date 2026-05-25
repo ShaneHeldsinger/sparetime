@@ -15,6 +15,8 @@
 import { ref, computed } from 'vue'
 import type { Task } from '@/types/task'
 import { calculateUrgency, isOverdue, isDueToday, formatDateLocale } from '@/utils/dateHelpers'
+import { usePeopleStore } from '@/stores/peopleStore'
+import { PersonAvatar } from '@/components/people'
 
 const props = defineProps<{
   task: Task
@@ -26,9 +28,28 @@ const emit = defineEmits<{
   delete: [task: Task]
 }>()
 
+const peopleStore = usePeopleStore()
+
 // Menu state
 const showMenu = ref(false)
 const isCompleting = ref(false)
+
+// Effective assignee: occurrence override (recurring) wins over the series default.
+// personById includes soft-deleted people so historical assignments still resolve a name.
+const assignee = computed(() => {
+  const id = props.task.occurrenceAssigneeId !== undefined
+    ? props.task.occurrenceAssigneeId
+    : props.task.assigneeId
+  return id ? peopleStore.personById(id) : undefined
+})
+
+const showAssignee = computed(() => {
+  if (props.task.occurrenceAssigneeId !== undefined) {
+    return props.task.occurrenceAssigneeId !== null
+  }
+
+  return !!props.task.assigneeId
+})
 
 // Computed properties
 const typeLabel = computed(() => {
@@ -291,6 +312,14 @@ function closeMenu() {
           <span v-if="urgencyInfo" :class="[urgencyInfo.class, 'px-1.5 py-0.5 rounded font-medium']">
             {{ urgencyInfo.text }}
           </span>
+
+          <!-- Assignee -->
+          <PersonAvatar
+            v-if="showAssignee"
+            :person="assignee"
+            size="xs"
+            data-testid="task-assignee-avatar"
+          />
         </div>
 
         <!-- Deadline if set -->

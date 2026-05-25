@@ -33,9 +33,22 @@ export const SCHEMA_VERSION_2 = {
 } as const
 
 /**
+ * Schema version 3 - People & task assignment
+ * - Adds the `people` table
+ * - Adds an `assigneeId` index on tasks (additive; existing rows need no migration)
+ */
+export const SCHEMA_VERSION_3 = {
+  tasks:
+    'id, name, type, status, deadline, [status+type], dependsOnId, recurringPattern.nextDueDate, [recurringPattern.nextDueDate+status], effortLevel, location, deletedAt, assigneeId',
+  suggestionSessions: '++id, timestamp',
+  syncState: 'id',
+  people: 'id, name, deletedAt'
+} as const
+
+/**
  * Current schema version
  */
-export const CURRENT_SCHEMA_VERSION = 2
+export const CURRENT_SCHEMA_VERSION = 3
 
 /**
  * Convert numeric priority (0-10) to Priority enum
@@ -55,6 +68,8 @@ export function getSchemaForVersion(version: number): Record<string, string> {
       return { ...SCHEMA_VERSION_1 }
     case 2:
       return { ...SCHEMA_VERSION_2 }
+    case 3:
+      return { ...SCHEMA_VERSION_3 }
     default:
       throw new Error(`Unknown schema version: ${version}`)
   }

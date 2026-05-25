@@ -4,6 +4,8 @@
  */
 
 import type { CreateTaskInput, Task, EffortLevel, Location, TaskType, Priority } from '@/types/task'
+import type { CreatePersonInput } from '@/types/person'
+import { PERSON_COLOR_KEYS } from '@/utils/personColors'
 
 /**
  * Validation result
@@ -61,6 +63,35 @@ export const TaskValidation = {
     }
   }
 } as const
+
+/**
+ * Person validation rules
+ */
+export const PersonValidation = {
+  name: { minLength: 1, maxLength: 50, required: true }
+} as const
+
+/**
+ * Validate a person input
+ *
+ * @param input - CreatePersonInput to validate
+ * @returns ValidationResult with errors if invalid
+ */
+export function validatePerson(input: CreatePersonInput): ValidationResult {
+  const errors: string[] = []
+
+  if (!input.name || typeof input.name !== 'string' || input.name.trim().length === 0) {
+    errors.push('Name is required')
+  } else if (input.name.trim().length > PersonValidation.name.maxLength) {
+    errors.push('Name must be 50 characters or less')
+  }
+
+  if (!input.color || !PERSON_COLOR_KEYS.includes(input.color)) {
+    errors.push('A valid color is required')
+  }
+
+  return { valid: errors.length === 0, errors }
+}
 
 /**
  * Validate a task input

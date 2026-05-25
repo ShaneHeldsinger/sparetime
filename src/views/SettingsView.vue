@@ -7,13 +7,30 @@
 
 import { ref, computed } from 'vue'
 import { GoogleDriveSync, SyncStatus } from '@/components/settings'
+import { PeopleManager } from '@/components/people'
 import { useSyncStore } from '@/stores/syncStore'
 import { useTaskStore } from '@/stores/taskStore'
+import { usePeopleStore } from '@/stores/peopleStore'
 import { db } from '@/db'
 import { deleteBackup } from '@/services/googleDrive'
 
 const syncStore = useSyncStore()
 const taskStore = useTaskStore()
+const peopleStore = usePeopleStore()
+
+async function clearLocalData(): Promise<void> {
+  await db.transaction('rw', db.tasks, db.people, db.syncState, async () => {
+    await db.tasks.clear()
+    await db.people.clear()
+    await db.syncState.clear()
+  })
+
+  await Promise.all([
+    taskStore.loadTasks(),
+    peopleStore.loadPeople(),
+    syncStore.loadSyncState()
+  ])
+}
 
 const isExporting = ref(false)
 const isDeleting = ref(false)
@@ -131,10 +148,7 @@ async function confirmDelete(): Promise<void> {
     switch (deleteTarget.value) {
       case 'local':
         // Delete local data only, preserve cloud backup
-        await db.tasks.clear()
-        await db.syncState.clear()
-        await taskStore.loadTasks()
-        await syncStore.loadSyncState()
+        await clearLocalData()
         showSuccess(`Successfully deleted ${taskCount} tasks from this device.`)
         break
 
@@ -156,10 +170,7 @@ async function confirmDelete(): Promise<void> {
         if (cloudToken) {
           await deleteBackup(cloudToken)
         }
-        await db.tasks.clear()
-        await db.syncState.clear()
-        await taskStore.loadTasks()
-        await syncStore.loadSyncState()
+        await clearLocalData()
         showSuccess(`Successfully deleted ${taskCount} tasks and cloud backup.`)
         break
       }
@@ -229,6 +240,11 @@ async function confirmDelete(): Promise<void> {
           <span class="text-gray-500">Tasks stored</span>
           <span class="font-medium text-gray-700">{{ taskStore.taskCount }}</span>
         </div>
+      </section>
+
+      <!-- People Section -->
+      <section class="settings-section rounded-lg bg-white border border-gray-200 p-4">
+        <PeopleManager />
       </section>
 
       <!-- Danger Zone - GitHub style with smart options -->

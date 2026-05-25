@@ -8,11 +8,13 @@ import { ref, computed, toRaw } from 'vue'
 import { db } from '@/db/database'
 import type { SyncState, PendingChange, SyncConflict, GoogleDriveBackup } from '@/types/sync'
 import type { Task } from '@/types/task'
+import type { Person } from '@/types/person'
 import { nowISO } from '@/utils/dateHelpers'
 import { generateChecksum as cryptoGenerateChecksum } from '@/utils/crypto'
 import { CURRENT_SCHEMA_VERSION } from '@/db/schema'
 import { getBackupLastModified, downloadBackup, uploadBackup, createBackupPayload } from '@/services/googleDrive'
 import type { TokenClient } from '@/services/googleDrive'
+import { usePeopleStore } from '@/stores/peopleStore'
 
 /**
  * Sync status enum
@@ -99,6 +101,10 @@ export const useSyncStore = defineStore('sync', () => {
 
   // Actions
 
+  async function refreshPeopleStore(): Promise<void> {
+    await usePeopleStore().loadPeople()
+  }
+
   /**
    * Load sync state from IndexedDB
    */
@@ -152,6 +158,9 @@ export const useSyncStore = defineStore('sync', () => {
 
     await db.syncState.put(initialState)
     syncState.value = initialState
+    lastSyncTime.value = null
+    remoteLastModified.value = null
+    syncStatus.value = 'idle'
   }
 
   /**
@@ -424,15 +433,16 @@ export const useSyncStore = defineStore('sync', () => {
    * Export all tasks to backup format
    */
   async function exportToBackup(): Promise<GoogleDriveBackup> {
-    const tasks = await db.tasks.toArray()
+    const [tasks, people] = await Promise.all([db.tasks.toArray(), db.people.toArray()])
 
-    // Generate checksum
+    // Checksum covers tasks only (people is additive) for backward compatibility
     const checksum = await generateChecksum(tasks)
 
     return {
       version: CURRENT_SCHEMA_VERSION,
       exportTimestamp: nowISO(),
       tasks,
+      people,
       checksum
     }
   }
@@ -453,6 +463,15 @@ export const useSyncStore = defineStore('sync', () => {
       await db.tasks.clear()
       await db.tasks.bulkAdd(backup.tasks)
     })
+
+    // Replace people from backup (additive field; absent on older backups)
+    await db.transaction('rw', db.people, async () => {
+      await db.people.clear()
+      if (backup.people && backup.people.length > 0) {
+        await db.people.bulkAdd(backup.people)
+      }
+    })
+    await refreshPeopleStore()
 
     // Update last sync time
     const now = nowISO()
@@ -576,6 +595,34 @@ export const useSyncStore = defineStore('sync', () => {
   }
 
   /**
+   * Merge people with remote using last-write-wins by updatedAt.
+   * Writes remote-newer (or remote-only) people to the local DB and returns the
+   * merged list for upload. People are low-churn so no conflict UI is needed.
+   */
+  async function mergePeople(remotePeople: Person[]): Promise<Person[]> {
+    const localPeople = await db.people.toArray()
+    const merged = new Map<string, Person>()
+    let didChangeLocalPeople = false
+    for (const p of localPeople) merged.set(p.id, p)
+
+    for (const remote of remotePeople) {
+      const local = merged.get(remote.id)
+      if (!local || new Date(remote.updatedAt) > new Date(local.updatedAt)) {
+        await db.people.put(remote)
+        merged.set(remote.id, remote)
+        didChangeLocalPeople = true
+      }
+      // else local is newer or equal - keep local (it will be uploaded)
+    }
+
+    if (didChangeLocalPeople) {
+      await refreshPeopleStore()
+    }
+
+    return Array.from(merged.values())
+  }
+
+  /**
    * Perform a full two-way sync with Google Drive
    * This is the main sync function that replaces backup/restore
    * Automatically retries once with token refresh on auth errors
@@ -605,6 +652,9 @@ export const useSyncStore = defineStore('sync', () => {
           remoteTaskMap.set(task.id, task)
         }
       }
+
+      // 2b. Merge people (last-write-wins by updatedAt; no conflict UI - low churn)
+      const mergedPeople = await mergePeople(remoteBackup?.people ?? [])
 
       // 3. Collect all unique task IDs
       const allTaskIds = new Set<string>([...localTaskMap.keys(), ...remoteTaskMap.keys()])
@@ -686,7 +736,7 @@ export const useSyncStore = defineStore('sync', () => {
       }
 
       // 6. Upload merged data to remote
-      const backupPayload = await createBackupPayload(mergedTasks)
+      const backupPayload = await createBackupPayload(mergedTasks, mergedPeople)
       await uploadBackup(token, backupPayload)
 
       // 7. Update sync state
@@ -847,13 +897,20 @@ export const useSyncStore = defineStore('sync', () => {
           return await performSync()
 
         case 'use-remote': {
-          // Clear local and download remote
+          // Clear local and download remote (tasks + people)
           const remoteBackup = await downloadBackup(token)
           if (remoteBackup) {
             await db.transaction('rw', db.tasks, async () => {
               await db.tasks.clear()
               await db.tasks.bulkAdd(remoteBackup.tasks)
             })
+            await db.transaction('rw', db.people, async () => {
+              await db.people.clear()
+              if (remoteBackup.people && remoteBackup.people.length > 0) {
+                await db.people.bulkAdd(remoteBackup.people)
+              }
+            })
+            await refreshPeopleStore()
           }
           await clearPendingChanges()
           return { success: true, tasksUploaded: 0, tasksDownloaded: remoteBackup?.tasks.length ?? 0, conflictsDetected: 0 }
@@ -861,8 +918,8 @@ export const useSyncStore = defineStore('sync', () => {
 
         case 'use-local': {
           // Upload local to remote (overwrite)
-          const localTasks = await db.tasks.toArray()
-          const backupPayload = await createBackupPayload(localTasks)
+          const [localTasks, localPeople] = await Promise.all([db.tasks.toArray(), db.people.toArray()])
+          const backupPayload = await createBackupPayload(localTasks, localPeople)
           await uploadBackup(token, backupPayload)
           await clearPendingChanges()
           return { success: true, tasksUploaded: localTasks.length, tasksDownloaded: 0, conflictsDetected: 0 }
